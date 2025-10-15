@@ -40,6 +40,25 @@ services:
       start_period: 5s
     restart: always
 
+  mongodb:
+    image: mongo:7.0
+    container_name: arxiv_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: arxiv_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: always
+
   airflow-webserver:
     <<: *airflow-common
     command: webserver
@@ -120,4 +139,5 @@ services:
 
 volumes:
   postgres-db-volume:
+  mongodb-data:
 

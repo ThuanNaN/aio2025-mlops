@@ -1,188 +1,203 @@
+# Run Airflow with Docker
+
+This guide will help you run Airflow ArXiv Scraper using Docker on Windows (or any OS).
+
+## Requirements
+
+- Docker Desktop (installed and running)
+- Docker Compose (included with Docker Desktop)
+- Git Bash or WSL2 (to run .sh scripts)
 
 
-## 🚀 Tính năng
-
-- **Lên lịch tự động**: Chạy hàng ngày để cào dữ liệu mới nhất
-- **Tìm kiếm linh hoạt**: Có thể tùy chỉnh từ khóa tìm kiếm
-- **Lưu trữ dữ liệu**: Xuất dữ liệu ra file CSV với timestamp
-- **Thống kê**: Tạo file summary với thống kê categories
-- **Monitoring**: Logging chi tiết để theo dõi quá trình
-
-## 📁 Cấu trúc thư mục
-
-```
-AirflowSimple/
-├── dags/
-│   ├── arxiv_scraper_dag.py    # DAG chính của Airflow
-│   └── arxiv_scraper.py        # Module cào dữ liệu
-├── requirements.txt            # Dependencies
-├── Dockerfile                  # Docker image definition
-├── docker-compose.yaml         # Docker services configuration
-├── .dockerignore               # Files to ignore in Docker build
-├── docker-start.sh             # Script khởi động Docker
-├── docker-stop.sh              # Script dừng Docker
-├── DOCKER_SETUP.md             # Hướng dẫn chi tiết Docker
-└── README.md                   # Hướng dẫn này
-```
-
-## 🛠️ Setup
-
-### 🐳 Cách 1: Chạy với Docker (Khuyến nghị cho Windows)
-
-Docker giúp tránh các vấn đề về môi trường và dependencies trên Windows.
-
-**Xem hướng dẫn chi tiết:** [DOCKER_SETUP.md](DOCKER_SETUP.md)
+### Start manually
 
 ```bash
-# 1. Tạo file .env với nội dung sau:
-# AIRFLOW_UID=50000
-# AIRFLOW_IMAGE_NAME=apache/airflow:2.7.3-python3.11
-# POSTGRES_USER=airflow
-# POSTGRES_PASSWORD=airflow
-# POSTGRES_DB=airflow
-# AIRFLOW_ADMIN_USERNAME=admin
-# AIRFLOW_ADMIN_PASSWORD=admin
-# AIRFLOW_ADMIN_EMAIL=admin@example.com
+# 1. Create a .env file (copy from template)
+# Create a .env file with the following content:
+```
 
-# 2. Build và khởi động
+Content of the `.env` file:
+```env
+# Airflow configuration. configuration
+AIRFLOW_UID=50000
+AIRFLOW_IMAGE_NAME=apache/airflow:2.7.3-python3.11
+
+# Database
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=airflow
+POSTGRES_DB=airflow
+
+# Airflow Admin User
+AIRFLOW_ADMIN_USERNAME=admin
+AIRFLOW_ADMIN_PASSWORD=admin
+AIRFLOW_ADMIN_EMAIL=admin@example.com
+```
+
+```bash
+#2. Create necessary folders
+mkdir logs
+mkdir plugins
+mkdir -p tmp/arxiv_data
+
+#3. Build Docker image
 docker compose build
+
+# 4. Initialize database
+docker compose up airflow-init
+
+#5. Start services
+docker compose up -d
+```
+
+## 🌐 Access Airflow
+
+After successful startup:
+
+- **Web UI**: http://localhost:8080
+- **Username**: `admin`
+- **Password**: `admin`
+
+## 📋 Management commands
+
+### View logs
+
+```bash
+# View logs of all services
+docker compose logs -f
+
+# View logs of a specific service
+docker compose logs -f airflow-webserver
+docker compose logs -f airflow-scheduler
+```
+
+### Stop Airflow
+
+```bash
+# Stop services (keep data)
+docker compose down
+
+# Or use script
+bash docker-stop.sh
+```
+
+### Delete completely (including database)
+
+```bash
+docker compose down -v
+```
+
+### Restart
+
+```bash
+docker compose restart
+```
+
+## Access MongoDB
+
+### Using MongoDB Compass (GUI)
+```
+Connection String: mongodb://admin:admin123@localhost:27017/
+Database: arxiv_db
+Collection: papers
+```
+## Using DAGs
+
+1. Go to http://localhost:8080
+2. Login with `admin`/`admin`
+3. Find DAG `arxiv_paper_scraper`
+4. Turn on the toggle to activate DAG
+5. Click "Trigger DAG" to run manually or wait for it to run on a schedule
+
+
+## 🔍 Data Cleaning Details
+
+### Processing Steps:
+
+1. **Remove Duplicates**: Remove papers with the same ID
+
+2. **String Normalization**:
+- Remove extra spaces
+- Remove invalid special characters
+- Trim whitespace
+3. **Missing Values**: Replace empty strings with None
+4. **URL Validation**: Check the validity of PDF URLs
+5. **Date Formatting**: Ensure the format is YYYY-MM-DD
+6. **Critical Fields Check**: Remove papers missing ID or title
+7. **Quality Flag**: Add `data_quality` flag for tracking
+
+## 📊 View output data
+
+Data is saved in the folder `tmp/arxiv_data/`:
+```bash
+# List files
+ls -la tmp/arxiv_data/
+
+# View CSV
+cat tmp/arxiv_data/arxiv_papers_*.csv
+```
+
+Check the logs of each task in Airflow UI:
+- `clean_data`: View statistics about data cleaning
+- `save_to_mongodb`: View the number of papers inserted/updated
+
+Using MongoDB Compass to check data
+## Troubleshooting
+
+### Error: "Cannot connect to the Docker daemon"
+
+Make sure Docker Desktop is running.
+
+### Error: "Port 8080 already in use"
+
+Change port in `docker-compose.yaml`:
+```yaml
+ports:
+- "8081:8080" # Change 8080 to 8081
+```
+
+### Error: "Permission denied" on Linux/macOS
+
+```bash
+# Set permissions for script
+chmod +x docker-start.sh docker-stop.sh
+```
+
+### DAG not appearing in UI
+
+```bash
+# Check logs
+docker compose logs airflow-scheduler
+
+# Restart scheduler
+docker compose restart airflow-scheduler
+```
+
+### Want to delete database and start over
+
+```bash
+docker compose down -v
 docker compose up airflow-init
 docker compose up -d
-
-# 3. Truy cập Web UI
-# http://localhost:8080
-# Username: admin / Password: admin
 ```
 
-### 💻 Cách 2: Cài đặt trực tiếp (Linux/macOS hoặc WSL2)
+## Security
 
-### 1. Install dependencies
+**Important Important**: Change the admin password in the `.env` file before deploying to production:
 
+```env
+AIRFLOW_ADMIN_USERNAME=your_username
+AIRFLOW_ADMIN_PASSWORD=strong_password_here
+AIRFLOW_ADMIN_EMAIL=your_email@domain.com
+```
+
+Then rebuild:
 ```bash
-pip install -r requirements.txt
+docker compose down -v
+docker compose up airflow-init
+docker compose up -d
 ```
 
-### 2. Init Airflow store
+## 📚 Additional documents
 
-```bash
-# Create folder Airflow
-mkdir airflow
-
-# Init database for Airflow
-airflow db init
-
-# Create User (admin)
-airflow users create \
-    --username admin \
-    --firstname Admin \
-    --lastname User \
-    --role Admin \
-    --email admin@example.com \
-    --password "YourPass123!"
-
-# Create User (PowerShell)
-airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password "YourPass123!"
-
-```
-
-### 3. Start Airflow
-
-```bash
-# Terminal 1: Start webserver
-airflow webserver --port 8080
-
-# Terminal 2: Start scheduler
-airflow scheduler
-```
-
-### 4. Access Airflow UI
-
-Access in browser: http://localhost:8080
-
-- Username: admin
-- Password: in Step 2
-
-## 📊 How to use
-
-### 1. Kích hoạt DAG
-
-1. Truy cập Airflow UI
-2. Tìm DAG tên `arxiv_paper_scraper`
-3. Bật toggle để kích hoạt DAG
-4. DAG sẽ tự động chạy theo lịch (hàng ngày)
-
-### 2. Tùy chỉnh tham sốs
-
-Trong file `dags/arxiv_scraper_dag.py`, bạn có thể thay đổi:
-
-```python
-# Từ khóa tìm kiếm
-'query': 'machine learning',  # Thay đổi từ khóa ở đây
-
-# Số lượng papers tối đa
-'max_results': 50,  # Thay đổi số lượng ở đây
-
-# Thư mục lưu dữ liệu
-'output_dir': '/tmp/arxiv_data'  # Thay đổi đường dẫn ở đây
-```
-
-### 3. Chạy thủ công
-
-Bạn có thể chạy DAG thủ công bằng cách:
-1. Click vào DAG name
-2. Click nút "Trigger DAG"
-
-## 📈 Dữ liệu đầu ra
-
-### File CSV
-Dữ liệu được lưu trong file CSV với format:
-- `arxiv_papers_YYYYMMDD_HHMMSS.csv`
-
-Các cột bao gồm:
-- `id`: ArXiv ID của paper
-- `title`: Tiêu đề paper
-- `authors`: Danh sách tác giả
-- `abstract`: Tóm tắt
-- `published`: Ngày xuất bản
-- `updated`: Ngày cập nhật cuối
-- `categories`: Danh mục (cs.AI, cs.LG, etc.)
-- `pdf_url`: Link tải PDF
-- `doi`: DOI của paper
-- `scraped_at`: Thời gian cào dữ liệu
-
-### File Summary
-File text với thống kê:
-- `summary_YYYYMMDD_HHMMSS.txt`
-
-## 🔧 Tùy chỉnh nâng cao
-
-### Thay đổi lịch chạy
-
-```python
-# Trong arxiv_scraper_dag.py
-schedule_interval=timedelta(days=1),  # Hàng ngày
-# Hoặc
-schedule_interval='0 6 * * *',  # 6h sáng hàng ngày (cron format)
-```
-
-### Thêm từ khóa tìm kiếm phức tạp
-
-```python
-# Ví dụ tìm kiếm papers về deep learning trong năm 2024
-'query': 'cat:cs.LG AND submittedDate:[20240101 TO 20241231]'
-```
-
-### Lưu dữ liệu vào database
-
-Bạn có thể mở rộng để lưu vào database thay vì CSV:
-
-```python
-# Thêm vào arxiv_scraper.py
-import sqlite3
-
-def save_to_database(papers, db_path):
-    conn = sqlite3.connect(db_path)
-    df = pd.DataFrame(papers)
-    df.to_sql('arxiv_papers', conn, if_exists='append', index=False)
-    conn.close()
-```
+- [Airflow Docker Documentation](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html)
+- [Docker Compose Documentation](https://docs.docker.com/compose/)
