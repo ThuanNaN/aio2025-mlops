@@ -49,6 +49,27 @@ docker compose up airflow-init
 docker compose up -d
 ```
 
+
+### Important configurations have been set
+
+```yaml
+environment: 
+# Executor - Allows running multiple tasks in parallel 
+AIRFLOW__CORE__EXECUTOR: LocalExecutor 
+
+# Database - PostgreSQL 
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow 
+
+# Task SDK - Connect to API server 
+AIRFLOW__TASK_SDK__BASE_URL: http://airflow-webserver:8080 
+AIRFLOW__TASK_SDK__API_VERSION: '2025-10-27' 
+
+# JWT Authentication - REQUIRED for Execution API 
+AIRFLOW__API_AUTH__JWT_SECRET: 'my-super-secret-jwt-key-for-airflow-2025' 
+AIRFLOW__EXECUTION_API__JWT_AUDIENCE: 'urn:airflow.apache.org:task' 
+AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: '600'
+```
+
 ## 🌐 Access Airflow
 
 After successful startup:
@@ -91,6 +112,11 @@ docker compose down -v
 ```bash
 docker compose restart
 ```
+
+### Access MinIO Console
+- URL: http://localhost:9001
+- Username: minioadmin
+- Password: minioadmin123
 
 ## Access MongoDB
 
@@ -143,6 +169,28 @@ Check the logs of each task in Airflow UI:
 Using MongoDB Compass to check data
 ## Troubleshooting
 
+
+### Task failed with "Invalid auth token: Signature verification failed"
+
+**Cause:** JWT secrets are not synchronized between scheduler and webserver
+
+**Solution:**
+
+```bash
+# MUST down and re-up, DO NOT just restart
+docker-compose down
+docker-compose up -d
+
+# Verify JWT is synchronized:
+docker exec airflowsimple-airflow-scheduler-1 python -c \
+"from airflow.configuration import conf; print(conf.get('api_auth', 'jwt_secret')[:20])"
+
+docker exec airflowsimple-airflow-webserver-1 python -c \
+"from airflow.configuration import conf; print(conf.get('api_auth', 'jwt_secret')[:20])"
+
+# The two outputs must be THE SAME
+```
+
 ### Error: "Cannot connect to the Docker daemon"
 
 Make sure Docker Desktop is running.
@@ -154,6 +202,14 @@ Change port in `docker-compose.yaml`:
 ports:
 - "8081:8080" # Change 8080 to 8081
 ```
+
+### Error: Don't see DAG in UI (Example for training)
+```bash
+docker exec airflowsimple-airflow-scheduler-1 python /opt/airflow/dags/arxiv_training_dag.py
+
+docker exec airflowsimple-airflow-scheduler-1 airflow dags reserialize
+```
+
 
 ### Error: "Permission denied" on Linux/macOS
 
@@ -197,7 +253,48 @@ docker compose up airflow-init
 docker compose up -d
 ```
 
-## 📚 Additional documents
+## 🤖 Machine Learning Training
 
-- [Airflow Docker Documentation](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html)
-- [Docker Compose Documentation](https://docs.docker.com/compose/)
+### Training DAG: `arxiv_category_trainer`
+
+**Purpose**: Train ML model to predict paper categories from title and abstract.
+
+**Features**:
+- **Multi-label Classification**: Predict multiple categories per paper
+- **Algorithm**: OneVsRestClassifier(LogisticRegression) + TF-IDF
+- **Data Source**: MongoDB papers collection
+- **Output**: Trained model artifacts saved locally
+
+**Quick Start**:
+```bash
+# Trigger training DAG
+docker exec airflowsimple-airflow-scheduler-1 airflow dags trigger arxiv_category_trainer
+
+# Check status
+docker exec airflowsimple-airflow-scheduler-1 airflow dags state arxiv_category_trainer
+```
+
+**Model Artifacts**:
+- `model.joblib` - Trained classifier
+- `vectorizer.joblib` - TF-IDF vectorizer  
+- `label_encoder.joblib` - Multi-label binarizer
+
+**Usage**:
+```python
+import joblib
+
+# Load model
+model = joblib.load('tmp/ml_training/models/model.joblib')
+vectorizer = joblib.load('tmp/ml_training/models/vectorizer.joblib')
+mlb = joblib.load('tmp/ml_training/models/label_encoder.joblib')
+```
+
+**Requirements**:
+- Minimum 10 papers in MongoDB
+- Dependencies: `scikit-learn`, `joblib`
+- Training time: ~1-2 minutes
+
+### For test model run in local:
+```bash
+python inference.py
+```

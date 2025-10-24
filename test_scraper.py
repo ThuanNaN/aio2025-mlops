@@ -30,7 +30,7 @@ def test_scraper():
         )
         
         if papers:
-            logger.info(f"✅ Scraped {len(papers)} papers")
+            logger.info(f"Scraped {len(papers)} papers")
             
             # Show first paper information
             if len(papers) > 0:
@@ -44,13 +44,13 @@ def test_scraper():
             # Test save data
             logger.info("Test save data...")
             save_to_csv(output_dir="./test_output")
-            logger.info("✅ Saved data successfully")
+            logger.info("Saved data successfully")
             
         else:
-            logger.warning("⚠️ Couldn't scrape any papers")
+            logger.warning("Couldn't scrape any papers")
             
     except Exception as e:
-        logger.error(f"❌ Error in testing: {str(e)}")
+        logger.error(f"Error in testing: {str(e)}")
         raise e
 
 def test_imports():
@@ -59,22 +59,22 @@ def test_imports():
         logger.info("Test import các modules...")
         
         import arxiv
-        logger.info("✅ arxiv module imported successfully")
+        logger.info("arxiv module imported successfully")
         
         import pandas as pd
-        logger.info("✅ pandas module imported successfully")
+        logger.info("pandas module imported successfully")
         
         from datetime import datetime
-        logger.info("✅ datetime module imported successfully")
+        logger.info("datetime module imported successfully")
         
         return True
         
     except ImportError as e:
-        logger.error(f"❌ Error importing module: {str(e)}")
+        logger.error(f"Error importing module: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    logger.info("🚀 Start testing ArXiv Scraper")
+    logger.info("Start testing ArXiv Scraper")
     logger.info("=" * 50)
     
     # Test imports before
@@ -82,9 +82,9 @@ if __name__ == "__main__":
         # Test scraper
         test_scraper()
         logger.info("=" * 50)
-        logger.info("✅ Test completed! Scraper is working normally.")
-        logger.info("📁 Check ./test_output directory to see the result")
+        logger.info("Test completed! Scraper is working normally.")
+        logger.info("Check ./test_output directory to see the result")
     else:
-        logger.error("❌ Test failed due to import modules error")
+        logger.error("Test failed due to import modules error")
         sys.exit(1)
 

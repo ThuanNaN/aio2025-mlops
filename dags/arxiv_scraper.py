@@ -6,24 +6,34 @@ import logging
 import re
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
+from pydantic import ValidationError
+
+# Import custom modules
+from models import ArxivPaper
+from minio_helper import save_task_data, load_task_data
 
 # logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def scrape_arxiv_papers(query="machine learning", max_results=50, output_dir="/tmp/arxiv_data"):
+def scrape_arxiv_papers(query="machine learning", max_results=50, output_dir="/tmp/arxiv_data", **context):
     """
     Args:
         query (str): Search query
         max_results (int): Maximum number of papers
         output_dir (str): Folder to save data (not used in this function)
+        **context: Airflow context (automatically provided)
     
     Returns:
-        list: List of papers (will be stored in XCom)
+        dict: Status information
     """
     try:
         logger.info(f"Start scraping data with query: {query}")
         logger.info(f"Target folder: {output_dir}")
+        
+        # Get run_id from context
+        run_id = context['run_id']
+        task_id = context['task_instance'].task_id
         
         # Init client
         client = arxiv.Client()
@@ -55,40 +65,46 @@ def scrape_arxiv_papers(query="machine learning", max_results=50, output_dir="/t
             }
             papers.append(paper_info)
             
-        logger.info(f"✅ Successfully scraped {len(papers)} papers")
-        logger.info(f"📤 Returning data via XCom to next task")
+        logger.info(f"Successfully scraped {len(papers)} papers")
+        logger.info(f"Saving data to MinIO...")
         
-        # Return data - Airflow will automatically store in XCom
-        return papers
+        # Save to MinIO 
+        save_task_data(task_id, run_id, papers)
+        logger.info(f"Data saved to MinIO: {run_id}/{task_id}.json")
+        
+        return {"status": "success", "count": len(papers)}
         
     except Exception as e:
         logger.error(f"Error scraping data: {str(e)}")
         raise e
 
-def save_to_csv(ti, output_dir="/tmp/arxiv_data"):
+def save_to_csv(output_dir="/tmp/arxiv_data", **context):
     """
     Save papers to CSV file.
-    Receives cleaned data from previous task via XCom.
+    Receives cleaned data from previous task via MinIO.
     
     Args:
-        ti: TaskInstance object (automatically provided by Airflow)
         output_dir (str): Folder to save CSV file
+        **context: Airflow context (automatically provided)
     """
     try:
-        logger.info("Pulling cleaned data from previous task via XCom...")
+        logger.info("Loading cleaned data from MinIO...")
         
-        # Get cleaned data from previous task via XCom
-        papers = ti.xcom_pull(task_ids='clean_data')
+        # Get run_id from context
+        run_id = context['run_id']
+        
+        # Get cleaned data from previous task via MinIO
+        papers = load_task_data('clean_data', run_id)
         
         if not papers:
-            logger.warning("⚠️ No data to save")
+            logger.warning("No data to save")
             return
         
-        logger.info(f"✅ Received {len(papers)} papers from XCom")
+        logger.info(f"Received {len(papers)} papers from MinIO")
         
         # Create folder if not exists
         os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"📁 Output directory: {output_dir}")
+        logger.info(f"Output directory: {output_dir}")
         
         # Create DataFrame
         df = pd.DataFrame(papers)
@@ -124,8 +140,8 @@ def save_to_csv(ti, output_dir="/tmp/arxiv_data"):
             for category, count in category_counts.most_common(10):
                 f.write(f"- {category}: {count} papers\n")
         
-        logger.info(f"📊 Created summary file: {summary_file}")
-        logger.info(f"✅ All files saved successfully!")
+        logger.info(f"Created summary file: {summary_file}")
+        logger.info(f"All files saved successfully!")
         
     except Exception as e:
         logger.error(f"Error saving data: {str(e)}")
@@ -156,27 +172,31 @@ def clean_string(text):
     return text if text else None
 
 
-def clean_paper_data(ti):
+def clean_paper_data(**context):
     """
     Clean and process paper data.
     Removes duplicates, normalizes strings, handles missing values.
-    Receives data from previous task via XCom.
+    Receives data from previous task via MinIO.
     
     Args:
-        ti: TaskInstance object (automatically provided by Airflow)
+        **context: Airflow context (automatically provided)
         
     Returns:
-        list: Cleaned list of papers (will be stored in XCom)
+        dict: Status information
     """
     try:
-        logger.info("Getting paper data...")
+        logger.info("Loading paper data from MinIO...")
         
-        # Get data from previous task via XCom
-        papers = ti.xcom_pull(task_ids='scrape_arxiv_papers')
+        # Get run_id from context
+        run_id = context['run_id']
+        task_id = context['task_instance'].task_id
+        
+        # Get data from previous task via MinIO
+        papers = load_task_data('scrape_arxiv_papers', run_id)
         
         if not papers:
             logger.warning("Not have data to clean")
-            return []
+            return {"status": "no_data", "count": 0}
         
         logger.info(f"Starting data cleaning with {len(papers)} papers...")
         
@@ -234,13 +254,18 @@ def clean_paper_data(ti):
         # Convert back to list of dictionaries
         cleaned_papers = df.to_dict('records')
         
-        logger.info(f"✅ Data cleaning completed. Cleaned papers: {len(cleaned_papers)}")
-        logger.info(f"📊 Statistics:")
+        logger.info(f"Data cleaning completed. Cleaned papers: {len(cleaned_papers)}")
+        logger.info(f"Statistics:")
         logger.info(f"  - Original papers: {original_count}")
         logger.info(f"  - Cleaned papers: {len(cleaned_papers)}")
         logger.info(f"  - Removed: {original_count - len(cleaned_papers)}")
 
-        return cleaned_papers
+        # Save to MinIO 
+        logger.info(f"Saving cleaned data to MinIO...")
+        save_task_data(task_id, run_id, cleaned_papers)
+        logger.info(f"Cleaned data saved to MinIO: {run_id}/{task_id}.json")
+
+        return {"status": "success", "count": len(cleaned_papers)}
         
     except Exception as e:
         logger.error(f"Error cleaning data: {str(e)}")
@@ -263,39 +288,68 @@ def get_mongodb_connection():
         
         # Test connection
         client.admin.command('ping')
-        logger.info("✅ MongoDB connection successful!")
+        logger.info("MongoDB connection successful!")
         
         return client
         
     except ConnectionFailure as e:
-        logger.error(f"❌ Cannot connect to MongoDB: {str(e)}")
+        logger.error(f"Cannot connect to MongoDB: {str(e)}")
         raise e
     except Exception as e:
-        logger.error(f"❌ MongoDB connection error: {str(e)}")
+        logger.error(f"MongoDB connection error: {str(e)}")
         raise e
 
 
-def save_to_mongodb(ti, db_name="arxiv_db", collection_name="papers"):
+def save_to_mongodb(db_name="arxiv_db", collection_name="papers", **context):
     """
-    Save cleaned papers to MongoDB.
-    Receives data from previous task via XCom.
+    Save cleaned papers to MongoDB with Pydantic validation.
+    Receives data from previous task via MinIO.
     
     Args:
-        ti: TaskInstance object (automatically provided by Airflow)
         db_name (str): Database name
         collection_name (str): Collection name
+        **context: Airflow context (automatically provided)
     """
     try:
-        logger.info("📥 Fetching data from previous task via XCom...")
+        logger.info("Loading data from MinIO...")
         
-        # Get cleaned data from previous task
-        papers = ti.xcom_pull(task_ids='clean_data')
+        # Get run_id from context
+        run_id = context['run_id']
+        
+        # Get cleaned data from previous task via MinIO
+        papers = load_task_data('clean_data', run_id)
         
         if not papers:
-            logger.warning("⚠ No data to save to MongoDB")
+            logger.warning("No data to save to MongoDB")
             return
 
-        logger.info(f"✅ Received {len(papers)} papers from XCom")
+        logger.info(f"Received {len(papers)} papers from MinIO")
+        
+        # Validate data with Pydantic
+        logger.info("Validating data with Pydantic models...")
+        validated_papers = []
+        validation_errors = []
+        
+        for i, paper_data in enumerate(papers):
+            try:
+                # Validate each paper with Pydantic
+                validated_paper = ArxivPaper(**paper_data)
+                # Convert to dict for MongoDB (without Pydantic methods)
+                validated_papers.append(validated_paper.model_dump())
+            except ValidationError as e:
+                logger.warning(f"Validation error for paper {i}: {str(e)}")
+                validation_errors.append({"index": i, "error": str(e)})
+        
+        if validation_errors:
+            logger.warning(f"Found {len(validation_errors)} validation errors")
+            for error in validation_errors[:5]:  # Show first 5 errors
+                logger.warning(f"  - Paper {error['index']}: {error['error']}")
+        
+        logger.info(f"Validated {len(validated_papers)}/{len(papers)} papers successfully")
+        
+        if not validated_papers:
+            logger.warning("No valid papers to save to MongoDB")
+            return
 
         # Connect to MongoDB
         client = get_mongodb_connection()
@@ -305,12 +359,12 @@ def save_to_mongodb(ti, db_name="arxiv_db", collection_name="papers"):
         # Create unique index on paper ID to prevent duplicates
         collection.create_index("id", unique=True)
         
-        # Insert papers
+        # Insert validated papers
         inserted_count = 0
         updated_count = 0
         duplicate_count = 0
         
-        for paper in papers:
+        for paper in validated_papers:
             try:
                 # Try to insert
                 collection.insert_one(paper)
@@ -330,7 +384,7 @@ def save_to_mongodb(ti, db_name="arxiv_db", collection_name="papers"):
                 except Exception as e:
                     logger.warning(f" Error updating paper {paper['id']}: {str(e)}")
 
-        logger.info(f"💾 Data saved to MongoDB:")
+        logger.info(f"Data saved to MongoDB:")
         logger.info(f"  - Database: {db_name}")
         logger.info(f"  - Collection: {collection_name}")
         logger.info(f"  - Papers added: {inserted_count}")
@@ -340,10 +394,10 @@ def save_to_mongodb(ti, db_name="arxiv_db", collection_name="papers"):
 
         # Close connection
         client.close()
-        logger.info("✅ Data saved to MongoDB successfully!")
+        logger.info("Data saved to MongoDB successfully!")
 
     except Exception as e:
-        logger.error(f"❌ Error saving to MongoDB: {str(e)}")
+        logger.error(f"Error saving to MongoDB: {str(e)}")
         raise e
 
 

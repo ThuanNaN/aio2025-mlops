@@ -1,6 +1,6 @@
-FROM apache/airflow:2.7.3-python3.11
+FROM apache/airflow:3.1.1rc1-python3.10
 
-# Copy và cài đặt dependencies
+# Copy and setup dependencies
 COPY requirements.txt /opt/airflow/requirements.txt
 RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
 
