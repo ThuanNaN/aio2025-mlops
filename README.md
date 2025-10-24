@@ -18,19 +18,19 @@ This guide will help you run Airflow ArXiv Scraper using Docker on Windows (or a
 
 Content of the `.env` file:
 ```env
-# Airflow configuration. configuration
-AIRFLOW_UID=50000
-AIRFLOW_IMAGE_NAME=apache/airflow:2.7.3-python3.11
-
-# Database
-POSTGRES_USER=airflow
-POSTGRES_PASSWORD=airflow
-POSTGRES_DB=airflow
-
 # Airflow Admin User
 AIRFLOW_ADMIN_USERNAME=admin
 AIRFLOW_ADMIN_PASSWORD=admin
 AIRFLOW_ADMIN_EMAIL=admin@example.com
+
+# Airflow configuration (Only for information)
+AIRFLOW_UID=50000
+AIRFLOW_IMAGE_NAME=apache/airflow:3.1.1rc1-python3.10
+
+# Database 
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=airflow
+POSTGRES_DB=airflow
 ```
 
 ```bash
